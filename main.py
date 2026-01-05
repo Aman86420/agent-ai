@@ -1,6 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
-from langchain import PromptTemplate, LLMChain
+from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 from PIL import Image
@@ -96,8 +96,8 @@ def generate_script(topic, goal, feedback=None):
                 "Script:"
             )
             prompt = PromptTemplate(input_variables=["topic", "goal", "feedback"], template=prompt_template)
-            chain = LLMChain(llm=llm, prompt=prompt)
-            result = chain.run(topic=topic, goal=goal, feedback=feedback)
+            chain = prompt | llm
+            result = chain.invoke({"topic": topic, "goal": goal, "feedback": feedback})
         else:
             prompt_template = (
                 "You are an expert content script writer. Create an engaging video script.\n\n"
@@ -110,10 +110,13 @@ def generate_script(topic, goal, feedback=None):
                 "Script:"
             )
             prompt = PromptTemplate(input_variables=["topic", "goal"], template=prompt_template)
-            chain = LLMChain(llm=llm, prompt=prompt)
-            result = chain.run(topic=topic, goal=goal)
+            chain = prompt | llm
+            result = chain.invoke({"topic": topic, "goal": goal})
 
-        return result
+        # Extract content from AIMessage response
+        if hasattr(result, 'content'):
+            return result.content
+        return str(result)
     except Exception as e:
         st.error(f"Script generation failed: {e}")
         return None
