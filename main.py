@@ -36,8 +36,12 @@ with st.sidebar:
     api_key = st.text_input("Enter Gemini API Key", type="password", key="api_key")
 
     if api_key:
-        genai.configure(api_key=api_key)
-        st.success("API Key configured!")
+        try:
+            genai.configure(api_key=api_key)
+            st.success("API Key configured!")
+        except Exception:
+            # older/newer packages may differ; we'll still store the key
+            st.warning("API key provided (could not configure programmatically).")
 
     st.markdown("---")
     st.markdown("### 📊 Pipeline Progress")
@@ -69,45 +73,87 @@ with st.sidebar:
 def generate_script(topic, goal, feedback=None):
     """Generate video script using Gemini via LangChain"""
     try:
+        # Use API key from sidebar input if available
+        google_api_key = st.session_state.get('api_key') or os.environ.get('GENAI_API_KEY')
+
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
-            google_api_key=api_key,
+            google_api_key=google_api_key,
             temperature=0.7
         )
 
         if feedback:
-            prompt_template = """You are an expert content script writer. 
-
-Previous script feedback: {feedback}
-
-Topic: {topic}
-Goal: {goal}
-
-Based on the feedback above, revise and improve the script. Create an engaging, well-structured video script that addresses the feedback.
-
-Format the script with:
-- Hook/Introduction
-- Main Content (with clear sections)
-- Call to Action/Conclusion
-
-Script:"""
-            prompt = PromptTemplate(
-                input_variables=["topic", "goal", "feedback"],
-                template=prompt_template
+            prompt_template = (
+                "You are an expert content script writer.\n\n"
+                "Previous script feedback: {feedback}\n\n"
+                "Topic: {topic}\n"
+                "Goal: {goal}\n\n"
+                "Based on the feedback above, revise and improve the script. Create an engaging, well-structured video script that addresses the feedback.\n\n"
+                "Format the script with:\n"
+                "- Hook/Introduction\n"
+                "- Main Content (with clear sections)\n"
+                "- Call to Action/Conclusion\n\n"
+                "Script:"
             )
+            prompt = PromptTemplate(input_variables=["topic", "goal", "feedback"], template=prompt_template)
             chain = LLMChain(llm=llm, prompt=prompt)
             result = chain.run(topic=topic, goal=goal, feedback=feedback)
         else:
-            prompt_template = """You are an expert content script writer. Create an engaging video script.
+            prompt_template = (
+                "You are an expert content script writer. Create an engaging video script.\n\n"
+                "Topic: {topic}\n"
+                "Goal: {goal}\n\n"
+                "Format the script with:\n"
+                "- Hook/Introduction\n"
+                "- Main Content (with clear sections)\n"
+                "- Call to Action/Conclusion\n\n"
+                "Script:"
+            )
+            prompt = PromptTemplate(input_variables=["topic", "goal"], template=prompt_template)
+            chain = LLMChain(llm=llm, prompt=prompt)
+            result = chain.run(topic=topic, goal=goal)
 
-Topic: {topic}
-Goal: {goal}
+        return result
+    except Exception as e:
+        st.error(f"Script generation failed: {e}")
+        return None
 
-```
 
+# Minimal UI logic to use the helper
+st.title("AI Content Generation Pipeline")
 
+if st.session_state.stage == 'input':
+    st.header("1. Topic Input")
+    topic = st.text_input("Topic", value=st.session_state.topic)
+    goal = st.text_input("Goal / Audience / Style", value=st.session_state.goal)
 
-ai_notes: Search result responses are limited to 10 results.
-You MUST let the user know the results may be incomplete.
-You MUST NOT answer questions about the number of results because of this limitation.
-You MUST provide a link to view more results in the GitHub UI; this link should be based on the fact that the results were fetched from code search."""
+    if st.button("Generate Script"):
+        st.session_state.topic = topic
+        st.session_state.goal = goal
+        with st.spinner("Generating script..."):
+            script = generate_script(topic, goal)
+        if script:
+            st.session_state.script = script
+            st.session_state.stage = 'script'
+            st.experimental_rerun()
+
+elif st.session_state.stage == 'script':
+    st.header("2. Script Generation")
+    st.subheader("Generated Script")
+    st.text_area("Script", value=st.session_state.script or "", height=400)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Regenerate Script"):
+            with st.spinner("Regenerating..."):
+                script = generate_script(st.session_state.topic, st.session_state.goal)
+            if script:
+                st.session_state.script = script
+                st.experimental_rerun()
+    with col2:
+        if st.button("Proceed to Thumbnail"):
+            st.session_state.stage = 'thumbnail'
+            st.experimental_rerun()
+
+else:
+    st.info("Pipeline stage not implemented in this minimal version.")
